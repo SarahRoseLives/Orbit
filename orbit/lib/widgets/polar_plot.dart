@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:math';
 import 'package:orbit/models/tle_data.dart';
+// Import the correct file for getLookAngles
 import '../utils/simple_tle_orbit.dart';
 
 class PolarPlot extends StatefulWidget {
   final double? observerLat;
   final double? observerLon;
+  final double? observerAlt; // Add observer altitude
   final List<TleLine>? selectedTleLines;
   final bool showOnlyInFootprint;
   final bool observerDot;
@@ -14,6 +16,7 @@ class PolarPlot extends StatefulWidget {
   const PolarPlot({
     this.observerLat,
     this.observerLon,
+    this.observerAlt, // Add to constructor
     this.selectedTleLines,
     this.showOnlyInFootprint = false,
     this.observerDot = false,
@@ -65,7 +68,8 @@ class _PolarPlotState extends State<PolarPlot> {
   List<Widget> _buildSatelliteDots(double plotRadius, double center) {
     if (widget.selectedTleLines == null ||
         widget.observerLat == null ||
-        widget.observerLon == null) {
+        widget.observerLon == null ||
+        widget.observerAlt == null) { // Check for altitude
       return [];
     }
 
@@ -79,11 +83,20 @@ class _PolarPlotState extends State<PolarPlot> {
       final prop = orbit.propagate(_currentTime);
       if (prop['r']!.isEmpty) continue;
 
-      final look = azElFromEci(widget.observerLat!, widget.observerLon!, prop['r']!, gmst);
+      // Use the corrected, central getLookAngles function
+      final look = getLookAngles(
+          widget.observerLat!,
+          widget.observerLon!,
+          widget.observerAlt! / 1000.0, // Pass altitude in km
+          prop['r']!,
+          prop['v']!,
+          gmst);
+
       final elevation = look['el']!;
 
       if (elevation > 0) {
         final azimuthDeg = look['az']!;
+        // The angle calculation for plotting is now correct because the azimuth is correct
         final radius = ((90 - elevation) / 90) * (plotRadius - 14);
         final angle = (azimuthDeg - 90) * (pi / 180);
         final x = center + radius * cos(angle) - 5;
@@ -127,41 +140,7 @@ class _PolarPlotState extends State<PolarPlot> {
     return dots;
   }
 
-  // Duplicating this here to avoid context issues with HomeScreen
-  Map<String, double> azElFromEci(double obsLat, double obsLon, List<double> rSatEci, double gmst) {
-    const double rad2deg = 180 / pi;
-    const double deg2rad = pi / 180;
-
-    final obsLatRad = obsLat * deg2rad;
-    final obsLonRad = obsLon * deg2rad;
-
-    // ECEF of Observer
-    final obsX = 6378.137 * cos(obsLatRad) * cos(obsLonRad);
-    final obsY = 6378.137 * cos(obsLatRad) * sin(obsLonRad);
-    final obsZ = 6378.137 * sin(obsLatRad);
-
-    // ECEF of Satellite
-    final satX = rSatEci[0] * cos(gmst) + rSatEci[1] * sin(gmst);
-    final satY = rSatEci[0] * -sin(gmst) + rSatEci[1] * cos(gmst);
-    final satZ = rSatEci[2];
-
-    // Range vector in ECEF
-    final rx = satX - obsX;
-    final ry = satY - obsY;
-    final rz = satZ - obsZ;
-
-    // Topocentric-Horizon coordinates (SEZ)
-    final s = sin(obsLatRad) * cos(obsLonRad) * rx + sin(obsLatRad) * sin(obsLonRad) * ry - cos(obsLatRad) * rz;
-    final e = -sin(obsLonRad) * rx + cos(obsLonRad) * ry;
-    final z = cos(obsLatRad) * cos(obsLonRad) * rx + cos(obsLatRad) * sin(obsLonRad) * ry + sin(obsLatRad) * rz;
-
-    final range = sqrt(s*s + e*e + z*z);
-    final el = asin(z / range);
-    final az = atan2(-e, s) + pi;
-
-    return { 'az': az * rad2deg, 'el': el * rad2deg };
-  }
-
+  // REMOVE THE DUPLICATED azElFromEci FUNCTION ENTIRELY
 
   @override
   Widget build(BuildContext context) {
@@ -225,7 +204,7 @@ class PolarPlotGridPainter extends CustomPainter {
       )..layout(minWidth: 0, maxWidth: 32);
 
       textPainter.paint(
-        canvas, Offset(x - textPainter.width / 2, y - textPainter.height / 2));
+          canvas, Offset(x - textPainter.width / 2, y - textPainter.height / 2));
     }
   }
 

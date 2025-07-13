@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:orbit/models/tle_data.dart';
+import 'package:orbit/services/tle_storage_service.dart'; // Import storage service
+import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 import 'screens/home_screen.dart';
-import 'screens/select_satellites_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'services/location_service.dart';
 import 'package:orbit/models/satellite.dart';
@@ -16,34 +17,60 @@ class OrbitApp extends StatefulWidget {
 }
 
 class _OrbitAppState extends State<OrbitApp> {
-  // Initial dummy data for all satellites and selected satellites
-  // In a real app, this would be loaded from persistent storage
+  final TleStorageService _tleStorageService = TleStorageService();
+  static const String _selectedSatellitesKey = 'selected_satellite_names';
+
   List<TleLine> _allTleLines = [];
   List<TleLine> _selectedTleLines = [];
-
-  // Placeholder for the "all satellites" list that will be used by SelectSatellitesScreen
   List<Satellite> _allSatellitesForSelection = [];
-
   Position? _currentPosition;
 
   @override
   void initState() {
     super.initState();
-    _initializeSatellites();
+    _loadData();
     _getLocation();
+  }
+
+  Future<void> _loadData() async {
+    // Load all TLEs from storage
+    List<TleLine> loadedTles = await _tleStorageService.loadTleLines();
+
+    // If storage is empty, initialize with dummy data and save it
+    if (loadedTles.isEmpty) {
+      loadedTles = _getInitialDummyTles();
+      await _tleStorageService.saveTleLines(loadedTles);
+    }
+
+    // Load selected satellite names from SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    final selectedNames = prefs.getStringList(_selectedSatellitesKey) ??
+        ['OSCAR 7 (AO-7)', 'SO-50', 'ISS (ZARYA)']; // Default selection
+
+    // Filter the loaded TLEs to get the selected ones
+    final selectedTles = loadedTles
+        .where((tle) => selectedNames.contains(tle.name))
+        .toList();
+
+    setState(() {
+      _allTleLines = loadedTles;
+      _selectedTleLines = selectedTles;
+      _updateAllSatellitesForSelection();
+    });
   }
 
   Future<void> _getLocation() async {
     final loc = await LocationService().getCurrentPosition();
-    setState(() {
-      _currentPosition = loc;
-    });
+    if (mounted) {
+      setState(() {
+        _currentPosition = loc;
+      });
+    }
   }
 
-  void _initializeSatellites() {
-    // Populate initial dummy TLE data for demonstration
-    // In a real application, this would come from a saved state or initial fetch
-    _allTleLines = [
+  List<TleLine> _getInitialDummyTles() {
+    // This is the fallback initial data
+    return [
       TleLine(
           name: 'OSCAR 7 (AO-7)',
           line1:
@@ -75,44 +102,48 @@ class _OrbitAppState extends State<OrbitApp> {
           line2:
               '2 25544  51.6432 123.4567 0008765 270.1234  89.0123 15.12345678901234'),
     ];
-
-    // Initialize selected satellites (e.g., from a saved preference)
-    _selectedTleLines = [
-      _allTleLines[0], // OSCAR 7
-      _allTleLines[3], // SO-50
-      _allTleLines[4], // ISS
-    ];
-
-    _updateAllSatellitesForSelection();
   }
 
   void _updateAllSatellitesForSelection() {
     _allSatellitesForSelection = _allTleLines.map((tle) {
-      // Extract NORAD Cat ID from TLE line1
       final catnum = tle.line1.substring(2, 7);
       return Satellite(tle.name, catnum);
     }).toList();
   }
 
-  // This function will be passed to UpdateTleScreen to receive updated TLEs
-  void _onTleUpdated(List<TleLine> newTleLines) {
+  void _onTleUpdated(List<TleLine> newTleLines) async {
+    // Save the new list of all TLEs
+    await _tleStorageService.saveTleLines(newTleLines);
+
+    final currentSelectedNames = _selectedTleLines.map((tle) => tle.name).toList();
+
+    // Re-evaluate selected satellites based on new TLEs
+    final newSelectedTles = newTleLines
+        .where((newTle) => currentSelectedNames.contains(newTle.name))
+        .toList();
+
     setState(() {
       _allTleLines = newTleLines;
-      // Re-evaluate selected satellites based on new TLEs, keeping existing if possible
-      _selectedTleLines = _selectedTleLines
-          .where(
-              (selected) => newTleLines.any((newTle) => newTle.name == selected.name))
-          .toList();
-      _updateAllSatellitesForSelection(); // Update the selection list
+      _selectedTleLines = newSelectedTles;
+      _updateAllSatellitesForSelection();
     });
+
+    // Also save the (potentially updated) list of selected names
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+        _selectedSatellitesKey, newSelectedTles.map((tle) => tle.name).toList());
   }
 
-  // This function will be passed to SelectSatellitesScreen to receive updated selection
-  void _onSatelliteSelectionUpdated(List<Satellite> newSelectedSatellites) {
+  void _onSatelliteSelectionUpdated(List<Satellite> newSelectedSatellites) async {
+    final newSelectedNames = newSelectedSatellites.map((s) => s.name).toList();
+
+    // Save the new selection to SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_selectedSatellitesKey, newSelectedNames);
+
     setState(() {
       _selectedTleLines = _allTleLines
-          .where(
-              (tle) => newSelectedSatellites.any((selected) => selected.name == tle.name))
+          .where((tle) => newSelectedNames.contains(tle.name))
           .toList();
     });
   }
@@ -129,14 +160,20 @@ class _OrbitAppState extends State<OrbitApp> {
         ),
         useMaterial3: true,
       ),
-      home: HomeScreen(
-        selectedSatellites: _selectedTleLines.map((tle) => tle.name).toList(),
-        selectedTleLines: _selectedTleLines, // <-- pass this!
-        allSatellitesForSelection: _allSatellitesForSelection,
-        onTleUpdated: _onTleUpdated,
-        onSatelliteSelectionUpdated: _onSatelliteSelectionUpdated,
-        currentPosition: _currentPosition,
-      ),
+      home: _allTleLines.isEmpty
+          ? Scaffold(
+              body: Center(
+                  child:
+                      CircularProgressIndicator())) // Show loading indicator
+          : HomeScreen(
+              selectedSatellites:
+                  _selectedTleLines.map((tle) => tle.name).toList(),
+              selectedTleLines: _selectedTleLines,
+              allSatellitesForSelection: _allSatellitesForSelection,
+              onTleUpdated: _onTleUpdated,
+              onSatelliteSelectionUpdated: _onSatelliteSelectionUpdated,
+              currentPosition: _currentPosition,
+            ),
       debugShowCheckedModeBanner: false,
     );
   }

@@ -5,6 +5,24 @@ class TleLine {
 
   TleLine({required this.name, required this.line1, required this.line2});
 
+  // Factory constructor for creating a new TleLine instance from a map.
+  factory TleLine.fromJson(Map<String, dynamic> json) {
+    return TleLine(
+      name: json['name'] as String,
+      line1: json['line1'] as String,
+      line2: json['line2'] as String,
+    );
+  }
+
+  // Method for converting a TleLine instance to a map.
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'line1': line1,
+      'line2': line2,
+    };
+  }
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||

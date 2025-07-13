@@ -465,6 +465,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: PolarPlot(
                 observerLat: widget.currentPosition?.latitude,
                 observerLon: widget.currentPosition?.longitude,
+                observerAlt: widget.currentPosition?.altitude,
                 selectedTleLines: widget.selectedTleLines.isNotEmpty ? widget.selectedTleLines : null,
               ),
             ),

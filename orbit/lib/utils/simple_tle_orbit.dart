@@ -104,8 +104,10 @@ Map<String, double> getLookAngles(
 
   final range = sqrt(rx*rx + ry*ry + rz*rz);
   final el = asin(z / range);
-  final az = atan2(-e, s) + pi;
-
+  var az = atan2(e, -s); // Correct formula for Azimuth from North (E, N)
+  if (az < 0) {
+    az += 2 * pi; // Normalize to 0-2PI range
+  }
   // Range Rate
   // Simplified by using dot product of range vector and velocity vector
   final vSatEcef = [
