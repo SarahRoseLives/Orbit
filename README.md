@@ -74,4 +74,8 @@ If you use satellites for ham radio, weather, or fun — join us and help make O
 
 ---
 
+## Credits
+- SGP4 Library https://github.com/brandon-rhodes/python-sgp4
+- Gemini AI - Porting SGP4 to Dart
+
 > _Made with ❤️ by @SarahRoseLives and contributors. Let's make satellite tracking awesome!_

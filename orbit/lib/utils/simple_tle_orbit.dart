@@ -1,62 +1,119 @@
 import 'dart:math';
+import 'sgp4.dart';
+import '../models/tle_data.dart'; // <-- This was missing
 
-// Helper to parse TLE epoch (YYDDD.DDDDDDDD) to DateTime
-DateTime tleEpochToDateTime(String epochString) {
-  // Example: 25192.95387804
-  int year = int.parse(epochString.substring(0, 2));
-  int dayOfYear = int.parse(epochString.substring(2, 5));
-  double dayFraction = double.parse(epochString.substring(5));
-  // Convert year (assume 2000+ if <57, else 1900+)
-  year += (year < 57) ? 2000 : 1900;
-  DateTime jan1 = DateTime.utc(year, 1, 1);
-  return jan1.add(Duration(days: dayOfYear - 1)) // DayOfYear is 1-based
-      .add(Duration(milliseconds: (dayFraction * 24 * 60 * 60 * 1000).round()));
+// A wrapper class to hold both the Satrec object and the original TLE data
+class Orbit {
+  final TleLine tle;
+  final Satrec satrec;
+
+  Orbit(this.tle) : satrec = Satrec.fromTle(tle.line1, tle.line2);
+
+  // Propagates the satellite to a specific UTC time.
+  // Returns position (r) and velocity (v) vectors in TEME (ECI) coordinates (km and km/s).
+  Map<String, List<double>> propagate(DateTime utc) {
+    final (jd, fr) = jdayFromDateTime(utc);
+    final minutesSinceEpoch =
+        (jd - satrec.jdsatepoch) * 1440.0 + (fr - satrec.jdsatepochF) * 1440.0;
+
+    return satrec.sgp4(minutesSinceEpoch);
+  }
 }
 
-// Extract mean motion (rev/day) from TLE line 2
-double parseMeanMotion(String line2) {
-  // Mean motion is columns 53-63 (starts at char 52, 11 chars)
-  return double.parse(line2.substring(52, 63).trim());
+// Converts ECI (Earth-Centered Inertial) coordinates to Geodetic (lat, lon, alt)
+Map<String, double> eciToGeodetic(List<double> r, double gmst) {
+  const double rad2deg = 180 / pi;
+  final double x = r[0];
+  final double y = r[1];
+  final double z = r[2];
+
+  // ECI to ECEF rotation
+  final double lonRad = atan2(y, x) - gmst;
+  final double r_ = sqrt(x * x + y * y);
+
+  // ECEF to Geodetic
+  final double a = wgs72.radiusearthkm;
+  const double f = 1 / 298.26; // WGS72 flattening
+  const double e2 = 2 * f - f * f;
+
+  double latRad = atan2(z, r_);
+  double c = cos(latRad);
+  double s = sin(latRad);
+  double N = a / sqrt(1 - e2 * s * s);
+
+  for (int i = 0; i < 5; i++) {
+    // Iterate to refine latitude
+    c = cos(latRad);
+    s = sin(latRad);
+    N = a / sqrt(1 - e2 * s * s);
+    latRad = atan2(z + N * e2 * s, r_);
+  }
+
+  final double alt = r_ / cos(latRad) - N;
+
+  return {
+    'lat': latRad * rad2deg,
+    'lon': (lonRad * rad2deg + 180) % 360 - 180, // Normalize lon to -180, 180
+    'alt': alt,
+  };
 }
 
-// Extract inclination (deg) from TLE line 2
-double parseInclination(String line2) {
-  // Inclination is columns 9-16
-  return double.parse(line2.substring(8, 16).trim());
+
+// Calculates Greenwich Mean Sidereal Time for a given UTC DateTime
+double gstimeFromDateTime(DateTime utc) {
+  final (jd, fr) = jdayFromDateTime(utc);
+  return gstime(jd + fr);
 }
 
-// Calculate satellite subpoint (lat, lon) at given time
-Map<String, double> simpleSatelliteSubpoint({
-  required String line1,
-  required String line2,
-  required DateTime nowUtc,
-}) {
-  // 1. Parse the epoch and mean motion
-  String epochString = line1.substring(18, 32).trim();
-  DateTime epoch = tleEpochToDateTime(epochString);
-  double meanMotion = parseMeanMotion(line2); // rev/day
-  double inclination = parseInclination(line2) * pi / 180; // radians
+// Calculates Julian Date from a DateTime object
+(double, double) jdayFromDateTime(DateTime utc) {
+  return jday(utc.year, utc.month, utc.day, utc.hour, utc.minute,
+      utc.second + utc.millisecond / 1000.0);
+}
 
-  // 2. Calculate minutes since epoch
-  double minutesSinceEpoch = nowUtc.difference(epoch).inSeconds / 60.0;
+// Correct Az/El calculation from ECI position and velocity vectors
+Map<String, double> getLookAngles(
+    double obsLat, double obsLon, double obsAlt, List<double> rSatEci, List<double> vSatEci, double gmst) {
+  const double rad2deg = 180 / pi;
+  const double deg2rad = pi / 180;
 
-  // 3. Calculate mean anomaly (radians)
-  double meanAnomaly = 2 * pi * ((meanMotion * minutesSinceEpoch) / (24 * 60));
-  meanAnomaly = meanAnomaly % (2 * pi);
+  final obsLatRad = obsLat * deg2rad;
+  final obsLonRad = obsLon * deg2rad;
 
-  // 4. Simple circular orbital plane: assume equatorial for now, add inclination
-  double orbitRadius = 6771; // Earth radius + 400km, km (LEO demo)
-  double satX = orbitRadius * cos(meanAnomaly);
-  double satY = orbitRadius * sin(meanAnomaly) * cos(inclination);
+  // ECEF of Observer
+  final double obsX = (wgs72.radiusearthkm + obsAlt) * cos(obsLatRad) * cos(obsLonRad);
+  final double obsY = (wgs72.radiusearthkm + obsAlt) * cos(obsLatRad) * sin(obsLonRad);
+  final double obsZ = (wgs72.radiusearthkm + obsAlt) * sin(obsLatRad);
+  final List<double> rObsEcef = [obsX, obsY, obsZ];
 
-  // 5. Convert to lat/lon assuming Earth's rotation
-  double earthRotationRate = 2 * pi / (23.9345 * 3600); // rad/sec
-  double secondsSinceEpoch = nowUtc.difference(epoch).inSeconds.toDouble();
-  double earthAngle = earthRotationRate * secondsSinceEpoch;
+  // ECEF of Satellite
+  final satX = rSatEci[0] * cos(gmst) + rSatEci[1] * sin(gmst);
+  final satY = rSatEci[0] * -sin(gmst) + rSatEci[1] * cos(gmst);
+  final satZ = rSatEci[2];
 
-  double longitude = atan2(satY, satX) * 180 / pi - earthAngle * 180 / pi;
-  longitude = ((longitude + 180) % 360) - 180;
-  double latitude = asin(sin(meanAnomaly) * sin(inclination)) * 180 / pi;
+  // Range vector in ECEF
+  final rx = satX - obsX;
+  final ry = satY - obsY;
+  final rz = satZ - obsZ;
+  final List<double> rangeVec = [rx, ry, rz];
 
-  return {'lat': latitude, 'lon': longitude};
+  // Topocentric-Horizon coordinates (SEZ)
+  final s = sin(obsLatRad) * cos(obsLonRad) * rx + sin(obsLatRad) * sin(obsLonRad) * ry - cos(obsLatRad) * rz;
+  final e = -sin(obsLonRad) * rx + cos(obsLonRad) * ry;
+  final z = cos(obsLatRad) * cos(obsLonRad) * rx + cos(obsLatRad) * sin(obsLonRad) * ry + sin(obsLatRad) * rz;
+
+  final range = sqrt(rx*rx + ry*ry + rz*rz);
+  final el = asin(z / range);
+  final az = atan2(-e, s) + pi;
+
+  // Range Rate
+  // Simplified by using dot product of range vector and velocity vector
+  final vSatEcef = [
+      vSatEci[0] * cos(gmst) + vSatEci[1] * sin(gmst),
+      vSatEci[0] * -sin(gmst) + vSatEci[1] * cos(gmst),
+      vSatEci[2]
+  ];
+  final rangeRate = (rangeVec[0]*vSatEcef[0] + rangeVec[1]*vSatEcef[1] + rangeVec[2]*vSatEcef[2]) / range;
+
+  return {'az': az * rad2deg, 'el': el * rad2deg, 'range': range, 'rangeRate': rangeRate};
 }
