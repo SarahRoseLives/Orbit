@@ -6,16 +6,18 @@ import 'package:orbit/models/satellite.dart';
 
 class UpdateTleScreen extends StatefulWidget {
   final Function(List<TleLine>) onTleUpdated;
-  final List<Satellite>? allSatellitesForSelection;
-  final Function(List<Satellite>)? onSatelliteSelectionUpdated;
-  final List<String>? currentSelectedSatelliteNames;
+  // Make these properties required
+  final List<Satellite> allSatellitesForSelection;
+  final Function(List<Satellite>) onSatelliteSelectionUpdated;
+  final List<String> currentSelectedSatelliteNames;
 
   const UpdateTleScreen({
     super.key,
     required this.onTleUpdated,
-    this.allSatellitesForSelection,
-    this.onSatelliteSelectionUpdated,
-    this.currentSelectedSatelliteNames,
+    // Update the constructor
+    required this.allSatellitesForSelection,
+    required this.onSatelliteSelectionUpdated,
+    required this.currentSelectedSatelliteNames,
   });
 
   @override
@@ -25,32 +27,21 @@ class UpdateTleScreen extends StatefulWidget {
 class _UpdateTleScreenState extends State<UpdateTleScreen> {
   final TleService _tleService = TleService();
 
+  // Updated list of TLE groups as per your request
   final List<_TleGroup> tleGroups = [
-    _TleGroup('amateur', 'Amateur', true),
+    _TleGroup('amateur', 'Amateur', false),
+    _TleGroup('active_amateur', 'Active Amateur', true),
     _TleGroup('cubesat', 'CubeSats', false),
-    _TleGroup('orbcomm', 'Orbcomm', false),
+    _TleGroup('orbcomm', 'Corbcomm', false), // Display name per request
     _TleGroup('sarsat', 'Sarsat', false),
-    _TleGroup('goes', 'GOES', false),
     _TleGroup('weather', 'Weather', false),
     _TleGroup('noaa', 'NOAA', false),
-    _TleGroup('gps', 'GPS', false),
-    _TleGroup('science', 'Science', false),
-    _TleGroup('other', 'Other', false),
+    _TleGroup('gps-ops', 'GPS', false), // CelesTrak group for GPS is gps-ops
   ];
 
   bool isLoading = false;
   bool showSatellites = false;
   List<TleLine> fetchedTleLines = [];
-
-  final Map<String, String> _celestrakGroupMap = {
-    'amateur': 'amateur',
-    'cubesat': 'cubesat',
-    'orbcomm': 'orbcomm',
-    'sarsat': 'sarsat',
-    'goes': 'goes',
-    'noaa': 'noaa',
-    'gps': 'gps',
-  };
 
   void _updateTle() async {
     setState(() {
@@ -63,65 +54,39 @@ class _UpdateTleScreenState extends State<UpdateTleScreen> {
       List<TleLine> allFetchedTles = [];
       for (var group in tleGroups) {
         if (group.selected) {
-          if (_celestrakGroupMap.containsKey(group.groupName)) {
-            final fetched = await _tleService.fetchTleGroup(group.groupName);
-            allFetchedTles.addAll(fetched);
+          List<TleLine> fetched;
+          if (group.groupName == 'active_amateur') {
+            // Fetch from the custom URL for Active Amateur sats
+            fetched = await _tleService.fetchTleFromUrl(
+                'https://sarahsforge.dev/downloads/TLE/active_amateur.php');
           } else {
-            if (group.groupName == 'weather') {
-              allFetchedTles.addAll([
-                TleLine(
-                  name: 'METEOR-M2',
-                  line1: '1 40069U 14037B   25192.12345678  .00000123  00000+0  12345-4 0  9998',
-                  line2: '2 40069  98.1234 100.5678 0001234  45.6789 300.1234 14.12345678901234',
-                ),
-                TleLine(
-                  name: 'FENGYUN-3C',
-                  line1: '1 39215U 13054A   25192.98765432  .00000456  00000+0  67890-4 0  9995',
-                  line2: '2 39215  98.1234 123.4567 0008765 270.1234  89.0123 15.12345678901234',
-                ),
-              ]);
-            } else if (group.groupName == 'science') {
-              allFetchedTles.addAll([
-                TleLine(
-                  name: 'AQUA',
-                  line1: '1 27424U 02022A   25192.12345678  .00000123  00000+0  12345-4 0  9998',
-                  line2: '2 27424  98.1234 100.5678 0001234  45.6789 300.1234 14.12345678901234',
-                ),
-                TleLine(
-                  name: 'TERRA',
-                  line1: '1 25994U 99068A   25192.98765432  .00000456  00000+0  67890-4 0  9995',
-                  line2: '2 25994  98.1234 123.4567 0008765 270.1234  89.0123 15.12345678901234',
-                ),
-              ]);
-            } else if (group.groupName == 'other') {
-              allFetchedTles.addAll([
-                TleLine(
-                  name: 'TLE-OTHER-1',
-                  line1: '1 11111U 11111A   25192.11111111  .00000001  00000+0  11111-1 0  9999',
-                  line2: '2 11111 00.1111 000.1111 0000001 000.1111 000.1111 0.11111111111111',
-                ),
-                TleLine(
-                  name: 'TLE-OTHER-2',
-                  line1: '1 22222U 22222A   25192.22222222  .00000002  00000+0  22222-2 0  8888',
-                  line2: '2 22222 00.2222 000.2222 0000002 000.2222 000.2222 0.22222222222222',
-                ),
-              ]);
-            }
+            // Fetch from Celestrak for all other groups
+            fetched = await _tleService.fetchTleGroup(group.groupName);
           }
+          allFetchedTles.addAll(fetched);
         }
       }
+
+      if (!mounted) return; // Check if the widget is still in the tree
+
+      // Remove duplicates by using a map
       final uniqueTleLines = <String, TleLine>{};
       for (var tle in allFetchedTles) {
         uniqueTleLines[tle.name] = tle;
       }
       fetchedTleLines = uniqueTleLines.values.toList();
       fetchedTleLines.sort((a, b) => a.name.compareTo(b.name));
+
+      // Callback to update the main app state
       widget.onTleUpdated(fetchedTleLines);
+
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to update TLE: $e')),
       );
     } finally {
+      if (!mounted) return;
       setState(() {
         isLoading = false;
         showSatellites = true;
@@ -132,16 +97,13 @@ class _UpdateTleScreenState extends State<UpdateTleScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      drawer: (widget.allSatellitesForSelection != null &&
-              widget.onSatelliteSelectionUpdated != null &&
-              widget.currentSelectedSatelliteNames != null)
-          ? LeftDrawer(
-              allSatellitesForSelection: widget.allSatellitesForSelection!,
-              onTleUpdated: widget.onTleUpdated,
-              onSatelliteSelectionUpdated: widget.onSatelliteSelectionUpdated!,
-              currentSelectedSatelliteNames: widget.currentSelectedSatelliteNames!,
-            )
-          : null,
+      // The drawer is now built unconditionally
+      drawer: LeftDrawer(
+        allSatellitesForSelection: widget.allSatellitesForSelection,
+        onTleUpdated: widget.onTleUpdated,
+        onSatelliteSelectionUpdated: widget.onSatelliteSelectionUpdated,
+        currentSelectedSatelliteNames: widget.currentSelectedSatelliteNames,
+      ),
       appBar: AppBar(
         title: const Text("Update TLE"),
       ),
@@ -150,7 +112,7 @@ class _UpdateTleScreenState extends State<UpdateTleScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             const Text(
-              "Download TLE from Celestrak",
+              "Download TLE Data",
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
@@ -161,11 +123,13 @@ class _UpdateTleScreenState extends State<UpdateTleScreen> {
             const SizedBox(height: 12),
             Card(
               color: Colors.grey[900],
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               child: Column(
                 children: tleGroups.map((group) {
                   return CheckboxListTile(
-                    title: Text(group.displayName, style: const TextStyle(color: Colors.white)),
+                    title: Text(group.displayName,
+                        style: const TextStyle(color: Colors.white)),
                     value: group.selected,
                     onChanged: (val) {
                       setState(() {
@@ -208,14 +172,17 @@ class _UpdateTleScreenState extends State<UpdateTleScreen> {
                   const SizedBox(height: 24),
                   Text(
                     "Satellites updated (${fetchedTleLines.length}):",
-                    style: TextStyle(fontWeight: FontWeight.bold, color: Colors.green[200]),
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, color: Colors.green[200]),
                   ),
                   const SizedBox(height: 8),
                   ...fetchedTleLines.map(
                     (tleLine) => ListTile(
                       dense: true,
-                      leading: Icon(Icons.satellite, color: Colors.blue[200], size: 20),
-                      title: Text(tleLine.name, style: const TextStyle(color: Colors.white)),
+                      leading: Icon(Icons.satellite,
+                          color: Colors.blue[200], size: 20),
+                      title: Text(tleLine.name,
+                          style: const TextStyle(color: Colors.white)),
                       subtitle: Text(
                         tleLine.line1.substring(2, 7),
                         style: TextStyle(color: Colors.grey[400], fontSize: 12),

@@ -1,15 +1,17 @@
+// widgets/left_drawer.dart
+
 import 'package:flutter/material.dart';
 import '../screens/home_screen.dart';
 import '../screens/select_satellites_screen.dart';
 import '../screens/update_tle_screen.dart';
-import '../models/tle_data.dart'; // Changed import
+import '../models/tle_data.dart';
 import 'package:orbit/models/satellite.dart';
 
 class LeftDrawer extends StatelessWidget {
   final List<Satellite> allSatellitesForSelection;
   final Function(List<TleLine>) onTleUpdated;
   final Function(List<Satellite>) onSatelliteSelectionUpdated;
-  final List<String> currentSelectedSatelliteNames; // Names of currently selected satellites
+  final List<String> currentSelectedSatelliteNames;
 
   const LeftDrawer({
     super.key,
@@ -21,7 +23,6 @@ class LeftDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Convert currentSelectedSatelliteNames back to Satellite objects for initial selection
     final List<Satellite> initialSelectedSatellites = allSatellitesForSelection
         .where((sat) => currentSelectedSatelliteNames.contains(sat.name))
         .toList();
@@ -29,7 +30,7 @@ class LeftDrawer extends StatelessWidget {
     return Drawer(
       child: ListView(
         children: [
-          DrawerHeader(
+          const DrawerHeader(
             child: Center(
               child: Text(
                 "Orbit",
@@ -38,34 +39,35 @@ class LeftDrawer extends StatelessWidget {
             ),
           ),
           ListTile(
-            leading: Icon(Icons.home),
-            title: Text("Home / Overview"),
+            leading: const Icon(Icons.home),
+            title: const Text("Home / Overview"),
             onTap: () {
-              // No need to pushReplacement if already on HomeScreen
-              Navigator.of(context).pop(); // Close the drawer
+              // ⭐️ CORRECTED CODE HERE ⭐️
+              // This will pop all routes until the first one (HomeScreen) is reached.
+              Navigator.of(context).popUntil((route) => route.isFirst);
             },
           ),
           ListTile(
-            leading: Icon(Icons.map),
-            title: Text("Map View"),
+            leading: const Icon(Icons.map),
+            title: const Text("Map View"),
             onTap: () {
-              // Implement when you have a dedicated map screen
-              // Navigator.of(context).pop();
-              // Navigator.of(context).pushReplacement(
-              //    MaterialPageRoute(builder: (context) => MapScreen()),
-              // );
+              // Not implemented
             },
           ),
           ListTile(
-            leading: Icon(Icons.satellite_alt),
-            title: Text("Satellite Selection"),
+            leading: const Icon(Icons.satellite_alt),
+            title: const Text("Satellite Selection"),
             onTap: () async {
-              Navigator.of(context).pop(); // Close the drawer first
-              final updatedSelection = await Navigator.of(context).push<List<Satellite>>(
+              Navigator.of(context).pop();
+              final updatedSelection =
+                  await Navigator.of(context).push<List<Satellite>>(
                 MaterialPageRoute(
                   builder: (context) => SelectSatellitesScreen(
                     allSatellites: allSatellitesForSelection,
                     selectedSatellitesInitial: initialSelectedSatellites,
+                    onTleUpdated: onTleUpdated,
+                    onSatelliteSelectionUpdated: onSatelliteSelectionUpdated,
+                    currentSelectedSatelliteNames: currentSelectedSatelliteNames,
                   ),
                 ),
               );
@@ -75,26 +77,27 @@ class LeftDrawer extends StatelessWidget {
             },
           ),
           ListTile(
-            leading: Icon(Icons.update),
-            title: Text("Update TLE"),
+            leading: const Icon(Icons.update),
+            title: const Text("Update TLE"),
             onTap: () async {
-              Navigator.of(context).pop(); // Close the drawer first
+              Navigator.of(context).pop();
               await Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (context) => UpdateTleScreen(onTleUpdated: onTleUpdated),
+                  builder: (context) => UpdateTleScreen(
+                    onTleUpdated: onTleUpdated,
+                    allSatellitesForSelection: allSatellitesForSelection,
+                    onSatelliteSelectionUpdated: onSatelliteSelectionUpdated,
+                    currentSelectedSatelliteNames: currentSelectedSatelliteNames,
+                  ),
                 ),
               );
             },
           ),
           ListTile(
-            leading: Icon(Icons.settings),
-            title: Text("Settings"),
+            leading: const Icon(Icons.settings),
+            title: const Text("Settings"),
             onTap: () {
-              // Implement when you have a settings screen
-              // Navigator.of(context).pop();
-              // Navigator.of(context).pushReplacement(
-              //    MaterialPageRoute(builder: (context) => SettingsScreen()),
-              // );
+              // Not implemented
             },
           ),
         ],
