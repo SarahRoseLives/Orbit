@@ -3,6 +3,7 @@ import '../widgets/left_drawer.dart';
 import '../services/tle_service.dart';
 import '../models/tle_data.dart';
 import 'package:orbit/models/satellite.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Import SharedPreferences
 
 class UpdateTleScreen extends StatefulWidget {
   final Function(List<TleLine>) onTleUpdated;
@@ -76,6 +77,14 @@ class _UpdateTleScreenState extends State<UpdateTleScreen> {
       }
       fetchedTleLines = uniqueTleLines.values.toList();
       fetchedTleLines.sort((a, b) => a.name.compareTo(b.name));
+
+      // ⭐ Save selected groups for auto-update feature ⭐
+      final prefs = await SharedPreferences.getInstance();
+      final selectedGroupNames = tleGroups
+          .where((g) => g.selected)
+          .map((g) => g.groupName)
+          .toList();
+      await prefs.setStringList('auto_update_groups', selectedGroupNames);
 
       // Callback to update the main app state
       widget.onTleUpdated(fetchedTleLines);

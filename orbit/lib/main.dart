@@ -6,6 +6,7 @@ import 'screens/home_screen.dart';
 import 'package:geolocator/geolocator.dart';
 import 'services/location_service.dart';
 import 'package:orbit/models/satellite.dart';
+import 'package:orbit/services/tle_service.dart'; // Add TLE Service import
 
 void main() {
   runApp(OrbitApp());
@@ -18,7 +19,11 @@ class OrbitApp extends StatefulWidget {
 
 class _OrbitAppState extends State<OrbitApp> {
   final TleStorageService _tleStorageService = TleStorageService();
+  final TleService _tleService = TleService(); // Instance for auto-updates
   static const String _selectedSatellitesKey = 'selected_satellite_names';
+  // Keys for auto-update logic
+  static const String _lastTleUpdateKey = 'last_tle_update_date';
+  static const String _autoUpdateGroupsKey = 'auto_update_groups';
 
   List<TleLine> _allTleLines = [];
   List<TleLine> _selectedTleLines = [];
@@ -28,8 +33,79 @@ class _OrbitAppState extends State<OrbitApp> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    // Chain the loading and auto-update checks
+    _loadData().then((_) => _checkAndPerformAutoUpdate());
     _getLocation();
+  }
+
+  /// Checks if a TLE update is needed and performs it.
+  Future<void> _checkAndPerformAutoUpdate() async {
+    final prefs = await SharedPreferences.getInstance();
+    final lastUpdateDate = prefs.getString(_lastTleUpdateKey);
+    final today = DateTime.now().toIso8601String().substring(0, 10); // Format: YYYY-MM-DD
+
+    if (lastUpdateDate != today) {
+      print("TLE data is outdated or has never been updated. Starting automatic update.");
+      // Add a small delay so startup feels smooth
+      await Future.delayed(const Duration(milliseconds: 500));
+      await _performAutoUpdate();
+    } else {
+      print("TLE data is up-to-date (updated today).");
+    }
+  }
+
+  /// Fetches TLEs for saved groups, updates state, and records the update time.
+  Future<void> _performAutoUpdate() async {
+    final prefs = await SharedPreferences.getInstance();
+    // Get the list of groups to update, defaulting to 'active_amateur'.
+    final List<String> groupsToUpdate =
+        prefs.getStringList(_autoUpdateGroupsKey) ?? ['active_amateur'];
+
+    if (groupsToUpdate.isEmpty) {
+      print("No TLE groups configured for auto-update.");
+      // Update date to prevent checking again today
+      await prefs.setString(_lastTleUpdateKey, DateTime.now().toIso8601String().substring(0, 10));
+      return;
+    }
+
+    try {
+      List<TleLine> allFetchedTles = [];
+      for (var groupName in groupsToUpdate) {
+        List<TleLine> fetched;
+        if (groupName == 'active_amateur') {
+          fetched = await _tleService.fetchTleFromUrl(
+              'https://sarahsforge.dev/downloads/TLE/active_amateur.php');
+        } else {
+          fetched = await _tleService.fetchTleGroup(groupName);
+        }
+        allFetchedTles.addAll(fetched);
+      }
+
+      if (allFetchedTles.isEmpty) {
+        print("Auto-update fetched no TLE data. Skipping storage update.");
+        return; // Don't update date, try again next time.
+      }
+
+      // Remove duplicates by using a map (preserves the last one seen).
+      final uniqueTleLines = <String, TleLine>{};
+      for (var tle in allFetchedTles) {
+        uniqueTleLines[tle.name] = tle;
+      }
+      final finalTleList = uniqueTleLines.values.toList();
+      finalTleList.sort((a, b) => a.name.compareTo(b.name));
+
+      // Use the existing callback to update state and save data.
+      await _onTleUpdated(finalTleList);
+
+      // Record successful update date.
+      final String today = DateTime.now().toIso8601String().substring(0, 10);
+      await prefs.setString(_lastTleUpdateKey, today);
+      print("Automatic TLE update successful.");
+
+    } catch (e) {
+      print("Automatic TLE update failed: $e");
+      // On failure, don't update the date, allowing a retry on the next app open.
+    }
   }
 
   Future<void> _loadData() async {
@@ -111,7 +187,7 @@ class _OrbitAppState extends State<OrbitApp> {
     }).toList();
   }
 
-  void _onTleUpdated(List<TleLine> newTleLines) async {
+  Future<void> _onTleUpdated(List<TleLine> newTleLines) async {
     // Save the new list of all TLEs
     await _tleStorageService.saveTleLines(newTleLines);
 
